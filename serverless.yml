@@ -1,0 +1,159 @@
+service: taller-orders
+frameworkVersion: "4"
+
+provider:
+  name: aws
+  runtime: nodejs22.x
+  stage: ${opt:stage, 'local'}
+  region: us-east-1
+  environment:
+    STAGE: ${self:provider.stage}
+    CORS_ORIGINS: ${file(./config/config-${self:provider.stage}.json):CORS_ORIGINS}
+    ORDERS_TABLE: !Ref OrdersTable
+  apiGateway:
+    restApiId: !ImportValue ${self:provider.stage}-MainRestApiId
+    restApiRootResourceId: !ImportValue ${self:provider.stage}-MainRestApiRootResourceId
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - logs:CreateLogGroup
+        - logs:CreateLogStream
+        - logs:PutLogEvents
+      Resource: "*"
+    - Effect: Allow
+      Action:
+        - dynamodb:PutItem
+        - dynamodb:GetItem
+        - dynamodb:UpdateItem
+        - dynamodb:DeleteItem
+        - dynamodb:Query
+        - dynamodb:Scan
+      Resource:
+        - !GetAtt OrdersTable.Arn
+        - !Sub "${OrdersTable.Arn}/index/*"
+    - Effect: Allow
+      Action:
+        - lambda:InvokeFunction
+      Resource:
+        - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:taller-${self:provider.stage}-Products-*"
+
+functions:
+  createOrders:
+    name: taller-${self:provider.stage}-Orders-Create
+    handler: src/handlers/createOrder.createOrder
+    events:
+      - http:
+          method: post
+          path: /orders/create
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+              - Authorization
+              - X-Api-Key
+              - X-Amz-Date
+              - X-Amz-Security-Token
+          authorizer:
+            type: CUSTOM
+            authorizerId: !ImportValue ${self:provider.stage}-MainAuthorizerId
+
+  getOrder:
+    name: taller-${self:provider.stage}-Orders-Get
+    handler: src/handlers/getOrder.getOrder
+    events:
+      - http:
+          method: get
+          path: /orders/{id}
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+              - Authorization
+              - X-Api-Key
+              - X-Amz-Date
+              - X-Amz-Security-Token
+          authorizer:
+            type: CUSTOM
+            authorizerId: !ImportValue ${self:provider.stage}-MainAuthorizerId
+
+  listOrdersByUserId:
+    name: taller-${self:provider.stage}-Orders-ListByUserId
+    handler: src/handlers/listOrdersByUserId.listOrdersByUserId
+    events:
+      - http:
+          method: get
+          path: /orders/list/users/{userId}
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+              - Authorization
+              - X-Api-Key
+              - X-Amz-Date
+              - X-Amz-Security-Token
+          authorizer:
+            type: CUSTOM
+            authorizerId: !ImportValue ${self:provider.stage}-MainAuthorizerId
+
+  confirmOrder:
+    name: taller-${self:provider.stage}-Orders-Confirm
+    handler: src/handlers/confirmOrder.confirmOrder
+    events:
+      - http:
+          method: post
+          path: /orders/{id}/confirm
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+              - Authorization
+              - X-Api-Key
+              - X-Amz-Date
+              - X-Amz-Security-Token
+          authorizer:
+            type: CUSTOM
+            authorizerId: !ImportValue ${self:provider.stage}-MainAuthorizerId
+
+  cancelOrder:
+    name: taller-${self:provider.stage}-Orders-Cancel
+    handler: src/handlers/cancelOrder.cancelOrder
+    events:
+      - http:
+          method: post
+          path: /orders/{id}/cancel
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+              - Authorization
+              - X-Api-Key
+              - X-Amz-Date
+              - X-Amz-Security-Token
+          authorizer:
+            type: CUSTOM
+            authorizerId: !ImportValue ${self:provider.stage}-MainAuthorizerId
+
+ 
+resources:
+  Resources:
+    OrdersTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${self:provider.stage}-orders
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: orderId
+            AttributeType: S
+          - AttributeName: userId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: orderId
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: UserOrdersIndex
+            KeySchema:
+              - AttributeName: userId
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+              
